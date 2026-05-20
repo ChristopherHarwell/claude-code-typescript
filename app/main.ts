@@ -1,4 +1,6 @@
 import OpenAI from "openai";
+import { Tool } from "../common/types";
+import { readTool } from "../common/tools";
 
 async function main() {
   const [, , flag, prompt] = process.argv;
@@ -21,6 +23,7 @@ async function main() {
   const response = await client.chat.completions.create({
     model: "anthropic/claude-haiku-4.5",
     messages: [{ role: "user", content: prompt }],
+    tools: [readTool],
   });
 
   if (!response.choices || response.choices.length === 0) {
