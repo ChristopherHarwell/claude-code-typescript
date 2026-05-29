@@ -1,14 +1,18 @@
+import type { ErrorCode, ErrorKind } from "./types";
+
 // ── Error taxonomy ─────────────────────────────────────────────────
 //
 // Every thrown error in this project should extend AppError so a caller can
 // dispatch on `kind` (string literal) or `code` (stable numeric id) without
-// regex-matching messages.
+// regex-matching messages. ErrorCode and ErrorKind are declared in types.ts;
+// the `satisfies` below keeps the runtime map in lockstep with them.
 //
 // Code ranges:
 //   1xxx — configuration / startup
 //   2xxx — input validation / refinement
 //   3xxx — protocol / API response
 //   4xxx — tool execution
+//   5xxx — agent loop control
 
 const ERROR_CODES = {
 	MissingEnvVar:           1001,
@@ -22,10 +26,7 @@ const ERROR_CODES = {
 	UnknownToolName:         3003,
 	ToolNotImplemented:      4001,
 	MaxIterationsExceeded:   5001,
-} as const;
-
-type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
-type ErrorKind = keyof typeof ERROR_CODES;
+} as const satisfies { readonly [K in ErrorKind]: ErrorCode };
 
 abstract class AppError extends Error {
 	public abstract readonly kind: ErrorKind;
@@ -185,4 +186,3 @@ export {
 	ToolNotImplementedError,
 	MaxIterationsExceededError,
 };
-export type { ErrorCode, ErrorKind };

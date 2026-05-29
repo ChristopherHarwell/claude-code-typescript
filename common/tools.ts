@@ -3,15 +3,15 @@ import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { Buffer } from "node:buffer";
 import type {
-	Assert,
 	BashTool,
 	ChatCompletionResponse,
 	DeepReadonly,
-	Equal,
+	ExecOutput,
 	FilePath,
 	JSONSchemaProperty,
 	Owned,
 	ParsedToolCall,
+	RawFunctionCall,
 	ReadTool,
 	ShellCommand,
 	Tool,
@@ -98,7 +98,6 @@ const bashTool: BashTool = deepFreeze<BashTool>({
 // and resolves with a structured ToolResults["Bash"] in both success and
 // failure paths — the encoder decides how to render it on the wire.
 
-type ExecOutput = Readonly<{ stdout: string; stderr: string }>;
 const execAsync: (
 	cmd: string,
 	opts: Readonly<{ encoding: "utf8"; timeout?: number }>,
@@ -226,10 +225,8 @@ const implementations: DeepReadonly<Owned<ToolImplementations>> = deepFreeze<
 	Bash: bashImpl,
 });
 
-// Compile-time guard that the registry covers exactly ToolName.
-type _AssertImplementationsKeys = Assert<
-	Equal<keyof ToolImplementations, ToolName>
->;
+// `_AssertImplementationsKeys` (in types.ts) verifies at typecheck that the
+// registry covers exactly ToolName.
 
 // ── Boundary narrowing ────────────────────────────────────────────
 // The OpenAI SDK types `function.name` as `string` and the tool-call union
@@ -243,15 +240,6 @@ const TOOL_NAMES: DeepReadonly<Owned<ReadonlySet<ToolName>>> = deepFreeze(
 function isToolName(name: string): name is ToolName {
 	return TOOL_NAMES.has(name as ToolName);
 }
-
-type RawFunctionCall = Readonly<{
-	readonly id: string;
-	readonly type: "function";
-	readonly function: Readonly<{
-		readonly name: string;
-		readonly arguments: string;
-	}>;
-}>;
 
 function narrowToolCall(
 	call: Readonly<{ readonly type: string }>,

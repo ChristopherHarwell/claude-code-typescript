@@ -3,12 +3,12 @@ import type {
 	ApiKey,
 	FilePath,
 	HTTPSURL,
+	HTTPURL,
 	NonEmptyString,
 	PromptFlag,
 	RelativePath,
 	ShellCommand,
 	TrimmedString,
-	URLString,
 } from "./types";
 import {
 	EmptyStringError,
@@ -26,52 +26,69 @@ import {
 // predicate occupies a unique `__brand__validated.${P}` field), so a doubly-
 // refined value is structurally distinct from a singly-refined one.
 
-export function asNonEmptyString(value: string, field: string): NonEmptyString {
+function asNonEmptyString(value: string, field: string): NonEmptyString {
 	if (value.length === 0) {
 		throw new EmptyStringError(field);
 	}
 	return value as NonEmptyString;
 }
 
-export function asTrimmedString(value: string, field: string): TrimmedString {
+function asTrimmedString(value: string, field: string): TrimmedString {
 	if (value !== value.trim()) {
 		throw new EmptyStringError(field);
 	}
 	return value as TrimmedString;
 }
 
-// Validates that `value` parses as a URL with an `http:` or `https:` scheme.
-// Returns the broader `URLString<WebProtocol>` brand (either protocol).
-export function asURLString(value: string, field: string): URLString {
-	let parsed: URL;
+// Strict per-protocol validators. Each parses the URL, then verifies the
+// scheme prefix matches its expected template-literal shape before branding.
+
+function asHTTPURL(value: string, field: string): HTTPURL {
 	try {
-		parsed = new URL(value);
+		new URL(value);
 	} catch {
 		throw new InvalidUrlError(field, value);
 	}
-	if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+	if (!value.startsWith("http://")) {
 		throw new InvalidUrlError(field, value);
 	}
-	return value as URLString;
+	return value as HTTPURL;
 }
 
-// Stricter variant: rejects any URL that isn't `https://…`. The return type is
-// `HTTPSURL = URLString<"https">`, which (thanks to distributive `Validated`)
-// is a subtype of the broader `URLString<WebProtocol>`.
-export function asHTTPSURL(value: string, field: string): HTTPSURL {
-	asURLString(value, field);
+function asHTTPSURL(value: string, field: string): HTTPSURL {
+	try {
+		new URL(value);
+	} catch {
+		throw new InvalidUrlError(field, value);
+	}
 	if (!value.startsWith("https://")) {
 		throw new InvalidUrlError(field, value);
 	}
 	return value as HTTPSURL;
 }
 
-export function asApiKey(value: string, field: string): ApiKey {
+// Smart dispatcher: validates that `value` is a parseable http:// or https://
+// URL and routes to the appropriate per-protocol validator so the return type
+// is the *precise* brand (`HTTPURL | HTTPSURL`), not just the broader union.
+// Thanks to distributive `Validated`, this is structurally identical to
+// `URLString<WebProtocol>` but narrows naturally on the consumer side via the
+// underlying template-literal-typed string.
+function asURLString(value: string, field: string): HTTPURL | HTTPSURL {
+	if (value.startsWith("https://")) {
+		return asHTTPSURL(value, field);
+	}
+	if (value.startsWith("http://")) {
+		return asHTTPURL(value, field);
+	}
+	throw new InvalidUrlError(field, value);
+}
+
+function asApiKey(value: string, field: string): ApiKey {
 	asNonEmptyString(value, field);
 	return value as ApiKey;
 }
 
-export function asPromptFlag(value: string): PromptFlag {
+function asPromptFlag(value: string): PromptFlag {
 	if (value !== "-p") {
 		throw new UnexpectedFlagError("-p", value);
 	}
@@ -83,7 +100,7 @@ export function asPromptFlag(value: string): PromptFlag {
 // strings. RelativePath is brand-only — TS can't express "does not start with
 // /" as a negative template literal pattern.
 
-export function asAbsolutePath(value: string, field: string): AbsolutePath {
+function asAbsolutePath(value: string, field: string): AbsolutePath {
 	asNonEmptyString(value, field);
 	if (!value.startsWith("/")) {
 		throw new InvalidPathError(field, value, "absolute");
@@ -91,7 +108,7 @@ export function asAbsolutePath(value: string, field: string): AbsolutePath {
 	return value as AbsolutePath;
 }
 
-export function asRelativePath(value: string, field: string): RelativePath {
+function asRelativePath(value: string, field: string): RelativePath {
 	asNonEmptyString(value, field);
 	if (value.startsWith("/")) {
 		throw new InvalidPathError(field, value, "relative");
@@ -101,13 +118,27 @@ export function asRelativePath(value: string, field: string): RelativePath {
 
 // Accepts either shape; the caller gets the discriminated `FilePath` union
 // and can narrow further with `.startsWith("/")` if needed.
-export function asFilePath(value: string, field: string): FilePath {
+function asFilePath(value: string, field: string): FilePath {
 	return value.startsWith("/")
 		? asAbsolutePath(value, field)
 		: asRelativePath(value, field);
 }
 
-export function asShellCommand(value: string, field: string): ShellCommand {
+function asShellCommand(value: string, field: string): ShellCommand {
 	asNonEmptyString(value, field);
 	return value as ShellCommand;
 }
+
+export {
+	asNonEmptyString,
+	asTrimmedString,
+	asHTTPURL,
+	asHTTPSURL,
+	asURLString,
+	asApiKey,
+	asPromptFlag,
+	asAbsolutePath,
+	asRelativePath,
+	asFilePath,
+	asShellCommand,
+};

@@ -4,8 +4,15 @@
 
 type Owned<T> = T & { readonly __owned: unique symbol };
 
+// Treats every primitive (including branded primitives like `string & {brand}`)
+// as a leaf — without the explicit `string | number | ...` clause, the
+// brand-object portion of `Validated<string, P>` triggers the `object` branch
+// and `keyof T` walks the underlying String prototype, destroying the brand +
+// template-literal structure. Deviates from the asure.identity.api source by
+// adding the primitive clause; the rest of the recursion is identical.
 type DeepReadonly<T> =
 	T extends Function ? T :
+	T extends string | number | bigint | boolean | symbol | null | undefined ? T :
 	T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } :
 	T;
 
@@ -50,6 +57,7 @@ type URLString<TProto extends WebProtocol = WebProtocol> = Validated<
 	`${TProto}://${string}`,
 	`URL.${TProto}`
 >;
+type HTTPURL = URLString<"http">;
 type HTTPSURL = URLString<"https">;
 
 // Paths use template literals to encode shape at the type level. AbsolutePath
@@ -70,13 +78,13 @@ type ShellCommand = Validated<string, "ShellCommand">;
 
 type JSONSchemaProperty = {
 	readonly type:
-		| "string"
-		| "number"
-		| "integer"
-		| "boolean"
-		| "array"
-		| "object"
-		| "null";
+	| "string"
+	| "number"
+	| "integer"
+	| "boolean"
+	| "array"
+	| "object"
+	| "null";
 	readonly description?: string;
 	readonly enum?: ReadonlyArray<unknown>;
 	readonly items?: JSONSchemaProperty;
@@ -125,18 +133,17 @@ type ToolArgs = {
 	readonly Bash: { readonly command: string; readonly timeout?: number };
 };
 
-// `path` is plain `string` (not `FilePath`) so DeepReadonly doesn't recurse
-// into the template-literal/string intersection brand. The FilePath refinement
-// runs inside the handler and is discarded once the call succeeds — the
-// result type just carries the resolved path forward to the encoder.
+// Each tool's result carries the refined types it produced — `path: FilePath`
+// here, not raw `string`, so the brand survives all the way to the encoder
+// and can't be replaced with an un-validated string anywhere downstream.
 type ToolResults = {
 	readonly Read: { readonly contents: string };
 	readonly Write: {
-		readonly path: string;
+		readonly path: FilePath;
 		readonly bytesWritten: number;
 	};
 	readonly Edit: {
-		readonly path: string;
+		readonly path: FilePath;
 		readonly replacements: number;
 	};
 	readonly Bash: {
@@ -187,6 +194,47 @@ type _AssertAbsolutePathIsFilePath = Assert<
 type _AssertBrandsDistinct = Assert<
 	Equal<NonEmptyString extends ApiKey ? true : false, false>
 >;
+type _AssertImplementationsKeys = Assert<
+	Equal<keyof ToolImplementations, ToolName>
+>;
+
+// ---------------------------------------------------------------------------
+// Shell execution types (consumed by common/tools.ts)
+// ---------------------------------------------------------------------------
+
+type ExecOutput = Readonly<{ stdout: string; stderr: string }>;
+
+// ---------------------------------------------------------------------------
+// Error taxonomy (the runtime ERROR_CODES const + class hierarchy live in
+// common/Error.ts; these are the type-level surface that downstream code
+// pattern-matches on).
+// ---------------------------------------------------------------------------
+
+type ErrorCode =
+	| 1001
+	| 1002
+	| 2001
+	| 2002
+	| 2003
+	| 2004
+	| 3001
+	| 3002
+	| 3003
+	| 4001
+	| 5001;
+
+type ErrorKind =
+	| "MissingEnvVar"
+	| "InvalidCliArguments"
+	| "EmptyString"
+	| "InvalidUrl"
+	| "UnexpectedFlag"
+	| "InvalidPath"
+	| "EmptyChoices"
+	| "UnsupportedToolCallType"
+	| "UnknownToolName"
+	| "ToolNotImplemented"
+	| "MaxIterationsExceeded";
 
 // ---------------------------------------------------------------------------
 // Tool call responses (subset of ToolDefinition: keeps `name`, drops
@@ -201,6 +249,17 @@ type ToolCallResponse<TName extends ToolName = ToolName> = {
 		readonly arguments: string; // JSON-encoded string, parse before use
 	};
 };
+
+// Raw SDK-shaped function tool call, used by `narrowToolCall` for boundary
+// validation before the data has been confirmed as a known ToolName.
+type RawFunctionCall = Readonly<{
+	readonly id: string;
+	readonly type: "function";
+	readonly function: Readonly<{
+		readonly name: string;
+		readonly arguments: string;
+	}>;
+}>;
 
 // Discriminated union with `name` correlated to `args` via K — the
 // per-variant `args` shape is dependent on the literal type of `name`.
@@ -289,6 +348,7 @@ export type {
 	NonEmptyString,
 	TrimmedString,
 	URLString,
+	HTTPURL,
 	HTTPSURL,
 	WebProtocol,
 	AbsolutePath,
@@ -301,4 +361,8 @@ export type {
 	ConversationMessage,
 	Role,
 	RoleContent,
+	ExecOutput,
+	RawFunctionCall,
+	ErrorCode,
+	ErrorKind,
 };

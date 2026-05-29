@@ -6,6 +6,7 @@ import type {
   ConversationMessage,
   DeepReadonly,
   HTTPSURL,
+  HTTPURL,
   NonEmptyString,
   Owned,
   ParsedToolCall,
@@ -27,9 +28,9 @@ import {
 import { deepFreeze } from "../common/deepFreeze";
 import {
   asApiKey,
-  asHTTPSURL,
   asNonEmptyString,
   asPromptFlag,
+  asURLString,
 } from "../common/refinements";
 import {
   EmptyChoicesError,
@@ -144,7 +145,14 @@ async function main(): Promise<void> {
   }
 
   const apiKey: ApiKey = asApiKey(rawApiKey, "OPENROUTER_API_KEY");
-  const baseURL: HTTPSURL = asHTTPSURL(rawBaseURL, "OPENROUTER_BASE_URL");
+  // `asURLString` dispatches between asHTTPURL and asHTTPSURL based on the
+  // scheme, so the return type is the precise `HTTPURL | HTTPSURL` brand
+  // union — not the broader URLString<WebProtocol>. CodeCrafters runs the
+  // harness against http://localhost; production deployments hit https://.
+  const baseURL: HTTPURL | HTTPSURL = asURLString(
+    rawBaseURL,
+    "OPENROUTER_BASE_URL",
+  );
   const flag: PromptFlag = asPromptFlag(rawFlag);
   const prompt: NonEmptyString = asNonEmptyString(rawPrompt, "prompt");
   void flag; // -p is validated, then discarded — only `prompt` is used downstream.
