@@ -9,45 +9,90 @@ type DeepReadonly<T> =
 	T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } :
 	T;
 
+// ── Compile-time assertions ────────────────────────────────────────
+// `type _ = Assert<Equal<A, B>>` errors at typecheck-time when A ≠ B.
+type Assert<T extends true> = T;
+type Equal<A, B> =
+	(<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
+
 // ---------------------------------------------------------------------------
-// Refinement / branded types
+// Brand + refinement composition
 //
-// Brand<T, B> tags a primitive so it can only be produced by a validator
-// (see common/refinements.ts) — preventing arbitrary `string` from flowing
-// into positions that demand a validated shape.
+// Each predicate stores itself in a *unique* field (`__brand__${B}`) so that
+// multiple refinements compose via intersection without colliding on a shared
+// key. `Validated<T, "URL"> & Validated<T, "NonEmpty">` carries both fields
+// independently, making a doubly-refined value structurally distinct from
+// either single brand. This is the closest TS gets to refinement types.
 // ---------------------------------------------------------------------------
 
-type Brand<T, B extends string> = T & { readonly __brand: B };
+// Distributive: when B is a union, the result is a union of individually
+// branded types (`(T & brandA) | (T & brandB)`), not a single object carrying
+// every brand at once. That keeps `Validated<T, "https">` a subtype of
+// `Validated<T, "http" | "https">` after distribution.
+type Brand<T, B extends string> = B extends string
+	? T & { readonly [K in `__brand__${B}`]: true }
+	: never;
 
-type NonEmptyString = Brand<string, "NonEmptyString">;
-type URLString = Brand<string, "URLString">;
-type ApiKey = Brand<string, "ApiKey">;
-type PromptFlag = Brand<"-p", "PromptFlag">;
-type FilePath = Brand<string, "FilePath">;
-type ShellCommand = Brand<string, "ShellCommand">;
+type Validated<T, P extends string> = P extends string
+	? Brand<T, `validated.${P}`>
+	: never;
+
+// Web protocols we accept for URL refinements.
+type WebProtocol = "http" | "https";
+
+type NonEmptyString = Validated<string, "NonEmpty">;
+type TrimmedString = Validated<string, "Trimmed">;
+
+// URLString is parametric over its protocol. The underlying string is a
+// template literal that pins the scheme at the type level. Default to either
+// http or https; HTTPSURL nails it down further.
+type URLString<TProto extends WebProtocol = WebProtocol> = Validated<
+	`${TProto}://${string}`,
+	`URL.${TProto}`
+>;
+type HTTPSURL = URLString<"https">;
+
+// Paths use template literals to encode shape at the type level. AbsolutePath
+// is guaranteed to start with `/` at compile time when constructed from a
+// literal; RelativePath is a runtime-checked brand (TS can't express the
+// negative pattern "does not start with /").
+type AbsolutePath = Validated<`/${string}`, "AbsolutePath">;
+type RelativePath = Validated<string, "RelativePath">;
+type FilePath = AbsolutePath | RelativePath;
+
+type ApiKey = Validated<string, "ApiKey">;
+type PromptFlag = Validated<"-p", "PromptFlag">;
+type ShellCommand = Validated<string, "ShellCommand">;
 
 // ---------------------------------------------------------------------------
-// JSON Schema + Tool definitions (original)
+// JSON Schema + Tool definitions
 // ---------------------------------------------------------------------------
 
 type JSONSchemaProperty = {
-	type: "string" | "number" | "integer" | "boolean" | "array" | "object" | "null";
-	description?: string;
-	enum?: readonly unknown[];
-	items?: JSONSchemaProperty;
-	properties?: Record<string, JSONSchemaProperty>;
-	required?: readonly string[];
+	readonly type:
+		| "string"
+		| "number"
+		| "integer"
+		| "boolean"
+		| "array"
+		| "object"
+		| "null";
+	readonly description?: string;
+	readonly enum?: ReadonlyArray<unknown>;
+	readonly items?: JSONSchemaProperty;
+	readonly properties?: Readonly<Record<string, JSONSchemaProperty>>;
+	readonly required?: ReadonlyArray<string>;
 };
 
 type ToolDefinition<TName extends string> = {
-	type: "function";
-	function: {
-		name: TName;
-		description: string;
-		parameters: {
-			type: "object";
-			properties: Record<string, JSONSchemaProperty>;
-			required: readonly string[];
+	readonly type: "function";
+	readonly function: {
+		readonly name: TName;
+		readonly description: string;
+		readonly parameters: {
+			readonly type: "object";
+			readonly properties: Readonly<Record<string, JSONSchemaProperty>>;
+			readonly required: ReadonlyArray<string>;
 		};
 	};
 };
@@ -55,10 +100,93 @@ type ToolDefinition<TName extends string> = {
 type ToolName = "Read" | "Write" | "Edit" | "Bash";
 type Tool = ToolDefinition<ToolName>;
 
-
 type ReadTool = ToolDefinition<"Read">;
 type WriteTool = ToolDefinition<"Write">;
 type BashTool = ToolDefinition<"Bash">;
+
+// ---------------------------------------------------------------------------
+// Dependent per-tool maps
+//
+// ToolArgs and ToolResults are keyed by ToolName. Everything downstream
+// (handlers, encoders, the parsed call, the dispatcher) is parameterized by
+// K extends ToolName, so the static types of `args` and `result` are
+// *computed from the value* in `name`. This is TypeScript's tightest
+// approximation of dependent typing.
+// ---------------------------------------------------------------------------
+
+type ToolArgs = {
+	readonly Read: { readonly file_path: string };
+	readonly Write: { readonly file_path: string; readonly content: string };
+	readonly Edit: {
+		readonly file_path: string;
+		readonly old_string: string;
+		readonly new_string: string;
+	};
+	readonly Bash: { readonly command: string; readonly timeout?: number };
+};
+
+// `path` is plain `string` (not `FilePath`) so DeepReadonly doesn't recurse
+// into the template-literal/string intersection brand. The FilePath refinement
+// runs inside the handler and is discarded once the call succeeds — the
+// result type just carries the resolved path forward to the encoder.
+type ToolResults = {
+	readonly Read: { readonly contents: string };
+	readonly Write: {
+		readonly path: string;
+		readonly bytesWritten: number;
+	};
+	readonly Edit: {
+		readonly path: string;
+		readonly replacements: number;
+	};
+	readonly Bash: {
+		readonly stdout: string;
+		readonly stderr: string;
+		readonly exitCode: number;
+	};
+};
+
+// Per-K handler + encoder. The handler returns a strongly-typed ToolResults[K];
+// the encoder serializes it to the wire string required by the tool message.
+type ToolHandler<K extends ToolName> = (
+	args: DeepReadonly<ToolArgs[K]>,
+) => Promise<ToolResults[K]>;
+
+type ToolEncoder<K extends ToolName> = (
+	result: DeepReadonly<ToolResults[K]>,
+) => string;
+
+// Bundle handler + encoder so dispatch can keep both ends of the K binding
+// without extra indirection.
+type ToolImplementation<K extends ToolName> = {
+	readonly handle: ToolHandler<K>;
+	readonly encode: ToolEncoder<K>;
+};
+
+type ToolImplementations = {
+	readonly [K in ToolName]: ToolImplementation<K>;
+};
+
+// ---------------------------------------------------------------------------
+// Compile-time consistency guards
+//
+// These error at typecheck if the per-tool maps ever drift from ToolName, or
+// if a brand collision happens. Pure type-level — zero JS emitted.
+// ---------------------------------------------------------------------------
+
+type _AssertArgsKeys = Assert<Equal<keyof ToolArgs, ToolName>>;
+type _AssertResultsKeys = Assert<Equal<keyof ToolResults, ToolName>>;
+type _AssertHTTPSIsURL = Assert<
+	[HTTPSURL] extends [URLString<WebProtocol>] ? true : false
+>;
+type _AssertAbsolutePathIsFilePath = Assert<
+	[AbsolutePath] extends [FilePath] ? true : false
+>;
+// Different validators MUST produce non-substitutable types — a NonEmptyString
+// must not be assignable to an ApiKey just because they're both branded strings.
+type _AssertBrandsDistinct = Assert<
+	Equal<NonEmptyString extends ApiKey ? true : false, false>
+>;
 
 // ---------------------------------------------------------------------------
 // Tool call responses (subset of ToolDefinition: keeps `name`, drops
@@ -66,50 +194,29 @@ type BashTool = ToolDefinition<"Bash">;
 // ---------------------------------------------------------------------------
 
 type ToolCallResponse<TName extends ToolName = ToolName> = {
-	id: string;
-	type: "function";
-	function: {
-		name: TName;
-		arguments: string; // JSON-encoded string, parse before use
+	readonly id: string;
+	readonly type: "function";
+	readonly function: {
+		readonly name: TName;
+		readonly arguments: string; // JSON-encoded string, parse before use
 	};
 };
 
-// ---------------------------------------------------------------------------
-// Per-tool argument shapes
-// ---------------------------------------------------------------------------
-
-// Source of truth for parsed argument shapes, one entry per ToolName.
-type ToolArgs = {
-	Read: { file_path: string };
-	Write: { file_path: string; content: string };
-	Edit: { file_path: string; old_string: string; new_string: string };
-	Bash: { command: string; timeout?: number };
-};
-
-// Zero-runtime guard: this errors if ToolArgs ever drifts from ToolName
-// (add a tool to the union, forget it here, get a compile error).
-type _Assert<T extends true> = T;
-type _ToolArgsComplete = _Assert<
-	[Exclude<ToolName, keyof ToolArgs>] extends [never] ? true : false
->;
-
-// Discriminated union keyed on `name` so `args` stays correlated to the tool.
+// Discriminated union with `name` correlated to `args` via K — the
+// per-variant `args` shape is dependent on the literal type of `name`.
 type ParsedToolCall = {
 	[K in ToolName]: {
-		id: string;
-		name: K;
-		args: ToolArgs[K];
+		readonly id: string;
+		readonly name: K;
+		readonly args: ToolArgs[K];
 	};
 }[ToolName];
-
-
 
 // ---------------------------------------------------------------------------
 // Conversation primitives
 //
-// Role is the closed set of speakers in the transcript. RoleContent is the
-// generic { role, content } pair shared by every message; the variants below
-// extend it with extras (`tool_calls`, `tool_call_id`) and pick content types.
+// Role is the closed set of speakers. RoleContent is the generic { role,
+// content } pair; the message variants below extend it.
 // ---------------------------------------------------------------------------
 
 type Role = "user" | "assistant" | "tool";
@@ -123,31 +230,21 @@ type RoleContent<TRole extends Role, TContent = string> = {
 // Chat completion response envelope
 // ---------------------------------------------------------------------------
 
-// Assistant content is `string | null` (null when the message is *only* tool
-// calls). `tool_calls` is wrapped in Partial so it can be omitted entirely on
-// terminal assistant messages.
 type ToolCallMessage =
 	RoleContent<"assistant", string | null>
 	& Partial<{ readonly tool_calls: ReadonlyArray<ToolCallResponse> }>;
 
 type Choice = {
-	index: number;
-	message: ToolCallMessage;
-	finish_reason: "stop" | "length" | "tool_calls" | "content_filter";
+	readonly index: number;
+	readonly message: ToolCallMessage;
+	readonly finish_reason: "stop" | "length" | "tool_calls" | "content_filter";
 };
 
 type ChatCompletionResponse = {
-	choices: Choice[];
+	readonly choices: ReadonlyArray<Choice>;
 };
 
-// The contract you implement: one handler per tool, each receiving args typed
-// to that specific tool and returning the result as a string (sync or async).
-type ToolImplementations = {
-	[K in ToolName]: (args: ToolArgs[K]) => string | Promise<string>;
-};
-
-// What you append to the conversation after running a tool call. Extends the
-// shared { role, content } base with the id linking it to the assistant's call.
+// What you append to the conversation after running a tool call.
 type ToolResultMessage = RoleContent<"tool"> & {
 	readonly tool_call_id: string;
 };
@@ -156,11 +253,7 @@ type ToolResultMessage = RoleContent<"tool"> & {
 // Conversation transcript
 // ---------------------------------------------------------------------------
 
-// The initial user prompt at the head of the conversation — just the base.
 type UserMessage = RoleContent<"user">;
-
-// Discriminated union of every message that can appear in the transcript the
-// agent loop sends back to the model. `role` is the discriminant.
 type ConversationMessage = UserMessage | ToolCallMessage | ToolResultMessage;
 
 // ---------------------------------------------------------------------------
@@ -177,20 +270,32 @@ export type {
 	BashTool,
 	ToolCallResponse,
 	ToolArgs,
+	ToolResults,
+	ToolHandler,
+	ToolEncoder,
+	ToolImplementation,
+	ToolImplementations,
 	ParsedToolCall,
 	ToolCallMessage,
-	ToolImplementations,
 	ToolResultMessage,
 	Choice,
 	ChatCompletionResponse,
 	DeepReadonly,
 	Owned,
 	Brand,
+	Validated,
+	Assert,
+	Equal,
 	NonEmptyString,
+	TrimmedString,
 	URLString,
+	HTTPSURL,
+	WebProtocol,
+	AbsolutePath,
+	RelativePath,
+	FilePath,
 	ApiKey,
 	PromptFlag,
-	FilePath,
 	ShellCommand,
 	UserMessage,
 	ConversationMessage,

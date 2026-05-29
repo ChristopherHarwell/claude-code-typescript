@@ -5,6 +5,7 @@ import type {
   Choice,
   ConversationMessage,
   DeepReadonly,
+  HTTPSURL,
   NonEmptyString,
   Owned,
   ParsedToolCall,
@@ -12,7 +13,6 @@ import type {
   ToolCallMessage,
   ToolCallResponse,
   ToolResultMessage,
-  URLString,
   UserMessage,
 } from "../common/types";
 import {
@@ -27,9 +27,9 @@ import {
 import { deepFreeze } from "../common/deepFreeze";
 import {
   asApiKey,
+  asHTTPSURL,
   asNonEmptyString,
   asPromptFlag,
-  asURLString,
 } from "../common/refinements";
 import {
   EmptyChoicesError,
@@ -144,7 +144,7 @@ async function main(): Promise<void> {
   }
 
   const apiKey: ApiKey = asApiKey(rawApiKey, "OPENROUTER_API_KEY");
-  const baseURL: URLString = asURLString(rawBaseURL, "OPENROUTER_BASE_URL");
+  const baseURL: HTTPSURL = asHTTPSURL(rawBaseURL, "OPENROUTER_BASE_URL");
   const flag: PromptFlag = asPromptFlag(rawFlag);
   const prompt: NonEmptyString = asNonEmptyString(rawPrompt, "prompt");
   void flag; // -p is validated, then discarded — only `prompt` is used downstream.

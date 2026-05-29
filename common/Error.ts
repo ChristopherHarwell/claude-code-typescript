@@ -16,6 +16,7 @@ const ERROR_CODES = {
 	EmptyString:             2001,
 	InvalidUrl:              2002,
 	UnexpectedFlag:          2003,
+	InvalidPath:             2004,
 	EmptyChoices:            3001,
 	UnsupportedToolCallType: 3002,
 	UnknownToolName:         3003,
@@ -93,6 +94,22 @@ class UnexpectedFlagError extends AppError {
 	}
 }
 
+class InvalidPathError extends AppError {
+	public override readonly name: "InvalidPathError" = "InvalidPathError";
+	public readonly kind: "InvalidPath" = "InvalidPath";
+	public readonly code: typeof ERROR_CODES.InvalidPath = ERROR_CODES.InvalidPath;
+	public readonly field: string;
+	public readonly value: string;
+	public readonly expectedShape: "absolute" | "relative";
+	public constructor(field: string, value: string, expectedShape: "absolute" | "relative") {
+		super(`${field} is not a valid ${expectedShape} path: ${value}`);
+		this.field = field;
+		this.value = value;
+		this.expectedShape = expectedShape;
+		Object.freeze(this);
+	}
+}
+
 class EmptyChoicesError extends AppError {
 	public override readonly name: "EmptyChoicesError" = "EmptyChoicesError";
 	public readonly kind: "EmptyChoices" = "EmptyChoices";
@@ -161,6 +178,7 @@ export {
 	EmptyStringError,
 	InvalidUrlError,
 	UnexpectedFlagError,
+	InvalidPathError,
 	EmptyChoicesError,
 	UnsupportedToolCallTypeError,
 	UnknownToolNameError,
