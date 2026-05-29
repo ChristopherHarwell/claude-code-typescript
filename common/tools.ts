@@ -1,31 +1,128 @@
+import { readFile } from "node:fs/promises";
 import type {
+	ChatCompletionResponse,
+	DeepReadonly,
+	FilePath,
+	JSONSchemaProperty,
+	Owned,
+	ParsedToolCall,
 	ReadTool,
-	ToolName,
+	Tool,
 	ToolArgs,
 	ToolCallResponse,
-	ChatCompletionResponse,
+	ToolDefinition,
 	ToolImplementations,
-	ParsedToolCall,
+	ToolName,
 	ToolResultMessage,
 } from "./types";
+import { deepFreeze } from "./deepFreeze";
+import { asFilePath } from "./refinements";
+import {
+	ToolNotImplementedError,
+	UnknownToolNameError,
+	UnsupportedToolCallTypeError,
+} from "./Error";
 
-const readTool: ReadTool = {
-	"type": "function",
-	"function": {
-		"name": "Read",
-		"description": "Read and return the contents of a file",
-		"parameters": {
-			"type": "object",
-			"properties": {
-				"file_path": {
-					"type": "string",
-					"description": "The path to the file to read"
-				}
+// ── Tool definitions ──────────────────────────────────────────────
+
+const readTool: ReadTool = deepFreeze<ReadTool>({
+	type: "function",
+	function: {
+		name: "Read",
+		description: "Read and return the contents of a file",
+		parameters: {
+			type: "object",
+			properties: {
+				file_path: {
+					type: "string",
+					description: "The path to the file to read",
+				},
 			},
-			"required": ["file_path"]
-		}
+			required: ["file_path"],
+		},
+	},
+});
+
+// ── Tool registry ─────────────────────────────────────────────────
+// Identity helper that re-binds a ToolDefinition with a tighter generic so
+// every registered tool carries its name in its type. Frozen at module load.
+
+function asToolDef<TName extends ToolName>(
+	def: ToolDefinition<TName>,
+): ToolDefinition<TName> {
+	return def;
+}
+
+const READ_TOOL: ReadTool = asToolDef<"Read">(readTool);
+
+const READ_FILE_PATH_SCHEMA: JSONSchemaProperty =
+	READ_TOOL.function.parameters.properties.file_path;
+
+const TOOLS: DeepReadonly<Owned<ReadonlyArray<Tool>>> = deepFreeze<Tool[]>([
+	READ_TOOL,
+]);
+
+// ── Tool implementations ──────────────────────────────────────────
+// Deeply frozen at module load so no caller can swap or mutate a handler.
+
+const implementations: DeepReadonly<Owned<ToolImplementations>> =
+	deepFreeze<ToolImplementations>({
+		Read: async (args: Readonly<ToolArgs["Read"]>): Promise<string> => {
+			const path: FilePath = asFilePath(args.file_path, "Read.file_path");
+			return readFile(path, "utf8");
+		},
+		Write: async (_args: Readonly<ToolArgs["Write"]>): Promise<string> => {
+			throw new ToolNotImplementedError("Write");
+		},
+		Edit: async (_args: Readonly<ToolArgs["Edit"]>): Promise<string> => {
+			throw new ToolNotImplementedError("Edit");
+		},
+		Bash: async (_args: Readonly<ToolArgs["Bash"]>): Promise<string> => {
+			throw new ToolNotImplementedError("Bash");
+		},
+	});
+
+// ── Boundary narrowing ────────────────────────────────────────────
+// The OpenAI SDK types `function.name` as `string` and the tool-call union
+// may include non-function variants. Narrow at the boundary; fail loud on
+// anything unexpected instead of asserting blindly downstream.
+
+const TOOL_NAMES: DeepReadonly<Owned<ReadonlySet<ToolName>>> = deepFreeze(
+	new Set<ToolName>(["Read", "Write", "Edit", "Bash"]),
+);
+
+function isToolName(name: string): name is ToolName {
+	return TOOL_NAMES.has(name as ToolName);
+}
+
+type RawFunctionCall = Readonly<{
+	readonly id: string;
+	readonly type: "function";
+	readonly function: Readonly<{
+		readonly name: string;
+		readonly arguments: string;
+	}>;
+}>;
+
+function narrowToolCall(
+	call: Readonly<{ readonly type: string }>,
+): DeepReadonly<Owned<ToolCallResponse>> {
+	if (call.type !== "function" || !("function" in call)) {
+		throw new UnsupportedToolCallTypeError(call.type);
 	}
-} as const;
+	const fnCall: RawFunctionCall = call as RawFunctionCall;
+	if (!isToolName(fnCall.function.name)) {
+		throw new UnknownToolNameError(fnCall.function.name);
+	}
+	return deepFreeze<ToolCallResponse>({
+		id: fnCall.id,
+		type: "function",
+		function: {
+			name: fnCall.function.name,
+			arguments: fnCall.function.arguments,
+		},
+	});
+}
 
 // ---------------------------------------------------------------------------
 // Tool execution
@@ -38,48 +135,68 @@ const readTool: ReadTool = {
  * the wire data matches ToolArgs[name]. For runtime validation, swap ToolArgs
  * for a zod (or similar) schema map and validate instead of casting.
  */
-function parseToolCall(call: ToolCallResponse): ParsedToolCall {
-	return {
+function parseToolCall(
+	call: DeepReadonly<ToolCallResponse>,
+): DeepReadonly<Owned<ParsedToolCall>> {
+	return deepFreeze<ParsedToolCall>({
 		id: call.id,
 		name: call.function.name,
 		args: JSON.parse(call.function.arguments),
-	} as ParsedToolCall;
+	} as ParsedToolCall);
 }
 
 // Generic indirection that keeps `name` and `args` correlated to the same K,
 // so `impls[name](args)` type-checks instead of hitting the union-of-functions
 // problem you'd get calling it directly on the discriminated union.
 function _invoke<K extends ToolName>(
-	impls: ToolImplementations,
+	impls: DeepReadonly<ToolImplementations>,
 	name: K,
-	args: ToolArgs[K],
+	args: DeepReadonly<ToolArgs[K]>,
 ): string | Promise<string> {
-	return impls[name](args);
+	return impls[name](args as ToolArgs[K]);
 }
 
 // Parse one tool call's arguments and dispatch to its implementation.
 function executeToolCall(
-	call: ToolCallResponse,
-	implementations: ToolImplementations,
+	call: DeepReadonly<ToolCallResponse>,
+	impls: DeepReadonly<ToolImplementations>,
 ): string | Promise<string> {
-	const parsed = parseToolCall(call);
-	return _invoke(implementations, parsed.name, parsed.args);
+	const parsed: DeepReadonly<Owned<ParsedToolCall>> = parseToolCall(call);
+	return _invoke(impls, parsed.name, parsed.args);
 }
 
 // Handle a full response: run every tool call in the single choice and return
 // one tool-result message per call, ready to send back to the model.
 async function handleResponse(
-	response: ChatCompletionResponse,
-	implementations: ToolImplementations,
-): Promise<ToolResultMessage[]> {
-	const toolCalls = response.choices[0]?.message.tool_calls ?? [];
-	return Promise.all(
-		toolCalls.map(async (call) => ({
-			role: "tool" as const,
-			tool_call_id: call.id,
-			content: await executeToolCall(call, implementations),
-		})),
+	response: DeepReadonly<ChatCompletionResponse>,
+	impls: DeepReadonly<ToolImplementations>,
+): Promise<DeepReadonly<Owned<ReadonlyArray<ToolResultMessage>>>> {
+	const toolCalls: ReadonlyArray<DeepReadonly<ToolCallResponse>> =
+		response.choices[0]?.message.tool_calls ?? [];
+	const results: ReadonlyArray<ToolResultMessage> = await Promise.all(
+		toolCalls.map(
+			async (call: DeepReadonly<ToolCallResponse>): Promise<ToolResultMessage> =>
+				deepFreeze<ToolResultMessage>({
+					role: "tool" as const,
+					tool_call_id: call.id,
+					content: await executeToolCall(call, impls),
+				}),
+		),
 	);
+	return deepFreeze<ReadonlyArray<ToolResultMessage>>(results);
 }
 
-export { readTool, executeToolCall, handleResponse, parseToolCall };
+export {
+	readTool,
+	READ_TOOL,
+	READ_FILE_PATH_SCHEMA,
+	TOOLS,
+	implementations,
+	TOOL_NAMES,
+	isToolName,
+	narrowToolCall,
+	executeToolCall,
+	handleResponse,
+	parseToolCall,
+	asToolDef,
+};

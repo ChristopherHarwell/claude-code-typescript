@@ -10,6 +10,22 @@ type DeepReadonly<T> =
 	T;
 
 // ---------------------------------------------------------------------------
+// Refinement / branded types
+//
+// Brand<T, B> tags a primitive so it can only be produced by a validator
+// (see common/refinements.ts) — preventing arbitrary `string` from flowing
+// into positions that demand a validated shape.
+// ---------------------------------------------------------------------------
+
+type Brand<T, B extends string> = T & { readonly __brand: B };
+
+type NonEmptyString = Brand<string, "NonEmptyString">;
+type URLString = Brand<string, "URLString">;
+type ApiKey = Brand<string, "ApiKey">;
+type PromptFlag = Brand<"-p", "PromptFlag">;
+type FilePath = Brand<string, "FilePath">;
+
+// ---------------------------------------------------------------------------
 // JSON Schema + Tool definitions (original)
 // ---------------------------------------------------------------------------
 
@@ -138,4 +154,10 @@ export type {
 	ChatCompletionResponse,
 	DeepReadonly,
 	Owned,
+	Brand,
+	NonEmptyString,
+	URLString,
+	ApiKey,
+	PromptFlag,
+	FilePath,
 };
