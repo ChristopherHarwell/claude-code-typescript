@@ -20,6 +20,7 @@ const ERROR_CODES = {
 	UnsupportedToolCallType: 3002,
 	UnknownToolName:         3003,
 	ToolNotImplemented:      4001,
+	MaxIterationsExceeded:   5001,
 } as const;
 
 type ErrorCode = (typeof ERROR_CODES)[keyof typeof ERROR_CODES];
@@ -138,6 +139,18 @@ class ToolNotImplementedError extends AppError {
 	}
 }
 
+class MaxIterationsExceededError extends AppError {
+	public override readonly name: "MaxIterationsExceededError" = "MaxIterationsExceededError";
+	public readonly kind: "MaxIterationsExceeded" = "MaxIterationsExceeded";
+	public readonly code: typeof ERROR_CODES.MaxIterationsExceeded = ERROR_CODES.MaxIterationsExceeded;
+	public readonly limit: number;
+	public constructor(limit: number) {
+		super(`agent loop exceeded max iterations: ${limit}`);
+		this.limit = limit;
+		Object.freeze(this);
+	}
+}
+
 Object.freeze(ERROR_CODES);
 
 export {
@@ -152,5 +165,6 @@ export {
 	UnsupportedToolCallTypeError,
 	UnknownToolNameError,
 	ToolNotImplementedError,
+	MaxIterationsExceededError,
 };
 export type { ErrorCode, ErrorKind };

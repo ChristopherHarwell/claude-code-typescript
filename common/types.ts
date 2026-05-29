@@ -102,14 +102,30 @@ type ParsedToolCall = {
 
 
 // ---------------------------------------------------------------------------
+// Conversation primitives
+//
+// Role is the closed set of speakers in the transcript. RoleContent is the
+// generic { role, content } pair shared by every message; the variants below
+// extend it with extras (`tool_calls`, `tool_call_id`) and pick content types.
+// ---------------------------------------------------------------------------
+
+type Role = "user" | "assistant" | "tool";
+
+type RoleContent<TRole extends Role, TContent = string> = {
+	readonly role: TRole;
+	readonly content: TContent;
+};
+
+// ---------------------------------------------------------------------------
 // Chat completion response envelope
 // ---------------------------------------------------------------------------
 
-type ToolCallMessage = {
-	role: "assistant";
-	content: string | null;
-	tool_calls?: ToolCallResponse[];
-};
+// Assistant content is `string | null` (null when the message is *only* tool
+// calls). `tool_calls` is wrapped in Partial so it can be omitted entirely on
+// terminal assistant messages.
+type ToolCallMessage =
+	RoleContent<"assistant", string | null>
+	& Partial<{ readonly tool_calls: ReadonlyArray<ToolCallResponse> }>;
 
 type Choice = {
 	index: number;
@@ -127,12 +143,22 @@ type ToolImplementations = {
 	[K in ToolName]: (args: ToolArgs[K]) => string | Promise<string>;
 };
 
-// What you append to the conversation after running a tool call.
-type ToolResultMessage = {
-	role: "tool";
-	tool_call_id: string;
-	content: string;
+// What you append to the conversation after running a tool call. Extends the
+// shared { role, content } base with the id linking it to the assistant's call.
+type ToolResultMessage = RoleContent<"tool"> & {
+	readonly tool_call_id: string;
 };
+
+// ---------------------------------------------------------------------------
+// Conversation transcript
+// ---------------------------------------------------------------------------
+
+// The initial user prompt at the head of the conversation — just the base.
+type UserMessage = RoleContent<"user">;
+
+// Discriminated union of every message that can appear in the transcript the
+// agent loop sends back to the model. `role` is the discriminant.
+type ConversationMessage = UserMessage | ToolCallMessage | ToolResultMessage;
 
 // ---------------------------------------------------------------------------
 // Exports
@@ -160,4 +186,8 @@ export type {
 	ApiKey,
 	PromptFlag,
 	FilePath,
+	UserMessage,
+	ConversationMessage,
+	Role,
+	RoleContent,
 };
