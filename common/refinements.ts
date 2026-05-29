@@ -1,6 +1,8 @@
 import type {
 	AbsolutePath,
 	ApiKey,
+	CliArg,
+	EnvVar,
 	FilePath,
 	HTTPSURL,
 	HTTPURL,
@@ -129,6 +131,21 @@ function asShellCommand(value: string, field: string): ShellCommand {
 	return value as ShellCommand;
 }
 
+// ── Provenance tags ────────────────────────────────────────────────
+//
+// Pre-validation source tags. Neither checks the value shape — they only
+// record where the string came from so the type system can distinguish a raw
+// CLI arg from a raw env var before any further refinement runs. Both pass
+// `undefined` through unchanged so consumers can use `??` for defaults.
+
+function asEnvVar(value: string | undefined): EnvVar | undefined {
+	return value === undefined ? undefined : (value as EnvVar);
+}
+
+function asCliArg(value: string | undefined): CliArg | undefined {
+	return value === undefined ? undefined : (value as CliArg);
+}
+
 export {
 	asNonEmptyString,
 	asTrimmedString,
@@ -141,4 +158,6 @@ export {
 	asRelativePath,
 	asFilePath,
 	asShellCommand,
+	asEnvVar,
+	asCliArg,
 };

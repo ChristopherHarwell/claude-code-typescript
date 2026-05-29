@@ -72,6 +72,14 @@ type ApiKey = Validated<string, "ApiKey">;
 type PromptFlag = Validated<"-p", "PromptFlag">;
 type ShellCommand = Validated<string, "ShellCommand">;
 
+// Provenance brands for raw, pre-validation inputs. `EnvVar` tags any string
+// read from `process.env`; `CliArg` tags any string read from `process.argv`.
+// Neither carries a value-shape predicate — they only record *where the
+// string came from*, so downstream validators (asApiKey, asURLString, …) can
+// accept any branded raw input and produce the final type-level refinement.
+type EnvVar = Validated<string, "EnvVar">;
+type CliArg = Validated<string, "CliArg">;
+
 // ---------------------------------------------------------------------------
 // JSON Schema + Tool definitions
 // ---------------------------------------------------------------------------
@@ -370,6 +378,8 @@ export type {
 	ApiKey,
 	PromptFlag,
 	ShellCommand,
+	EnvVar,
+	CliArg,
 	UserMessage,
 	ConversationMessage,
 	Role,

@@ -1,7 +1,9 @@
 import OpenAI from "openai";
 import type {
   ApiKey,
+  CliArg,
   DeepReadonly,
+  EnvVar,
   HTTPSURL,
   HTTPURL,
   NonEmptyString,
@@ -11,6 +13,8 @@ import type {
 import { deepFreeze } from "../common/deepFreeze";
 import {
   asApiKey,
+  asCliArg,
+  asEnvVar,
   asNonEmptyString,
   asPromptFlag,
   asURLString,
@@ -30,10 +34,16 @@ async function main(): Promise<void> {
   const argv: DeepReadonly<Owned<ReadonlyArray<string>>> = deepFreeze<
     ReadonlyArray<string>
   >([...process.argv]);
-  const rawFlag: string | undefined = argv[2];
-  const rawPrompt: string | undefined = argv[3];
-  const rawApiKey: string | undefined = process.env.OPENROUTER_API_KEY;
-  const rawBaseURL: string = process.env.OPENROUTER_BASE_URL ?? DEFAULT_BASE_URL;
+  // Tag every raw input with its source so the type carries provenance:
+  // `CliArg` for anything off process.argv, `EnvVar` for anything off
+  // process.env. The downstream refinement constructors (asApiKey, asURLString,
+  // …) accept either brand (both extend `string`) and produce the final
+  // value-shape refinement on top.
+  const rawFlag: CliArg | undefined = asCliArg(argv[2]);
+  const rawPrompt: CliArg | undefined = asCliArg(argv[3]);
+  const rawApiKey: EnvVar | undefined = asEnvVar(process.env.OPENROUTER_API_KEY);
+  const rawBaseURL: EnvVar | NonEmptyString =
+    asEnvVar(process.env.OPENROUTER_BASE_URL) ?? DEFAULT_BASE_URL;
 
   if (rawApiKey === undefined) {
     throw new MissingEnvVarError("OPENROUTER_API_KEY");
