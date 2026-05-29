@@ -198,6 +198,19 @@ type _AssertImplementationsKeys = Assert<
 	Equal<keyof ToolImplementations, ToolName>
 >;
 
+// Sentinel that references every project-wide compile-time invariant. The
+// individual `_Assert…` aliases above are load-bearing — their declarations
+// run the checks — but they appear "unused" to noUnusedLocals. Unifying them
+// here makes each name referenced exactly once at the type level, so
+// `--noUnusedLocals` stays happy without changing any runtime behavior.
+type _ProjectInvariants =
+	| _AssertArgsKeys
+	| _AssertResultsKeys
+	| _AssertHTTPSIsURL
+	| _AssertAbsolutePathIsFilePath
+	| _AssertBrandsDistinct
+	| _AssertImplementationsKeys;
+
 // ---------------------------------------------------------------------------
 // Shell execution types (consumed by common/tools.ts)
 // ---------------------------------------------------------------------------
@@ -365,4 +378,5 @@ export type {
 	RawFunctionCall,
 	ErrorCode,
 	ErrorKind,
+	_ProjectInvariants,
 };
