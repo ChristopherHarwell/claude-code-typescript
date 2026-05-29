@@ -24,6 +24,7 @@ type URLString = Brand<string, "URLString">;
 type ApiKey = Brand<string, "ApiKey">;
 type PromptFlag = Brand<"-p", "PromptFlag">;
 type FilePath = Brand<string, "FilePath">;
+type ShellCommand = Brand<string, "ShellCommand">;
 
 // ---------------------------------------------------------------------------
 // JSON Schema + Tool definitions (original)
@@ -57,6 +58,7 @@ type Tool = ToolDefinition<ToolName>;
 
 type ReadTool = ToolDefinition<"Read">;
 type WriteTool = ToolDefinition<"Write">;
+type BashTool = ToolDefinition<"Bash">;
 
 // ---------------------------------------------------------------------------
 // Tool call responses (subset of ToolDefinition: keeps `name`, drops
@@ -172,6 +174,7 @@ export type {
 	ToolName,
 	ReadTool,
 	WriteTool,
+	BashTool,
 	ToolCallResponse,
 	ToolArgs,
 	ParsedToolCall,
@@ -188,6 +191,7 @@ export type {
 	ApiKey,
 	PromptFlag,
 	FilePath,
+	ShellCommand,
 	UserMessage,
 	ConversationMessage,
 	Role,

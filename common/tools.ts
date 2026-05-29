@@ -1,5 +1,8 @@
 import { readFile, writeFile } from "node:fs/promises";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
 import type {
+	BashTool,
 	ChatCompletionResponse,
 	DeepReadonly,
 	FilePath,
@@ -7,6 +10,7 @@ import type {
 	Owned,
 	ParsedToolCall,
 	ReadTool,
+	ShellCommand,
 	Tool,
 	ToolArgs,
 	ToolCallResponse,
@@ -17,7 +21,7 @@ import type {
 	WriteTool,
 } from "./types";
 import { deepFreeze } from "./deepFreeze";
-import { asFilePath } from "./refinements";
+import { asFilePath, asShellCommand } from "./refinements";
 import {
 	ToolNotImplementedError,
 	UnknownToolNameError,
@@ -66,6 +70,70 @@ const writeTool: WriteTool = deepFreeze<WriteTool>({
 	},
 });
 
+// ── Shell execution ───────────────────────────────────────────────
+// Promise-based wrapper around child_process.exec. Captures stdout + stderr
+// and, on non-zero exit, returns whatever the command printed plus an error
+// line so the model can see the failure context instead of just throwing.
+
+type ExecOutput = Readonly<{ stdout: string; stderr: string }>;
+const execAsync: (
+	cmd: string,
+	opts: Readonly<{ encoding: "utf8"; timeout?: number }>,
+) => Promise<ExecOutput> = promisify(exec) as unknown as (
+	cmd: string,
+	opts: Readonly<{ encoding: "utf8"; timeout?: number }>,
+) => Promise<ExecOutput>;
+
+async function runShellCommand(
+	command: ShellCommand,
+	timeout: number | undefined,
+): Promise<string> {
+	try {
+		const result: ExecOutput = await execAsync(command, {
+			encoding: "utf8",
+			timeout,
+		});
+		return `${result.stdout}${result.stderr}`;
+	} catch (err: unknown) {
+		if (err !== null && typeof err === "object") {
+			const e: Readonly<{
+				readonly stdout?: unknown;
+				readonly stderr?: unknown;
+				readonly message?: unknown;
+			}> = err as Readonly<{
+				readonly stdout?: unknown;
+				readonly stderr?: unknown;
+				readonly message?: unknown;
+			}>;
+			const out: string = typeof e.stdout === "string" ? e.stdout : "";
+			const errOut: string = typeof e.stderr === "string" ? e.stderr : "";
+			const msg: string =
+				typeof e.message === "string" ? e.message : "command failed";
+			const captured: string = `${out}${errOut}`;
+			return `${captured}${captured.length > 0 ? "\n" : ""}Error: ${msg}`;
+		}
+		return `Error: ${String(err)}`;
+	}
+}
+
+const bashTool: BashTool = deepFreeze<BashTool>({
+	type: "function",
+	function: {
+		name: "Bash",
+		description: "Execute a shell command",
+		parameters: {
+			type: "object",
+			properties: {
+				command: {
+					type: "string",
+					description: "The command to execute",
+				},
+			},
+			required: ["command"],
+		},
+	},
+});
+
 // ── Tool registry ─────────────────────────────────────────────────
 // Identity helper that re-binds a ToolDefinition with a tighter generic so
 // every registered tool carries its name in its type. Frozen at module load.
@@ -78,6 +146,7 @@ function asToolDef<TName extends ToolName>(
 
 const READ_TOOL: ReadTool = asToolDef<"Read">(readTool);
 const WRITE_TOOL: WriteTool = asToolDef<"Write">(writeTool);
+const BASH_TOOL: BashTool = asToolDef<"Bash">(bashTool);
 
 const READ_FILE_PATH_SCHEMA: JSONSchemaProperty =
 	READ_TOOL.function.parameters.properties.file_path;
@@ -85,6 +154,7 @@ const READ_FILE_PATH_SCHEMA: JSONSchemaProperty =
 const TOOLS: DeepReadonly<Owned<ReadonlyArray<Tool>>> = deepFreeze<Tool[]>([
 	READ_TOOL,
 	WRITE_TOOL,
+	BASH_TOOL,
 ]);
 
 // ── Tool implementations ──────────────────────────────────────────
@@ -104,8 +174,9 @@ const implementations: DeepReadonly<Owned<ToolImplementations>> =
 		Edit: async (_args: Readonly<ToolArgs["Edit"]>): Promise<string> => {
 			throw new ToolNotImplementedError("Edit");
 		},
-		Bash: async (_args: Readonly<ToolArgs["Bash"]>): Promise<string> => {
-			throw new ToolNotImplementedError("Bash");
+		Bash: async (args: Readonly<ToolArgs["Bash"]>): Promise<string> => {
+			const command: ShellCommand = asShellCommand(args.command, "Bash.command");
+			return runShellCommand(command, args.timeout);
 		},
 	});
 
@@ -216,8 +287,10 @@ async function handleResponse(
 export {
 	readTool,
 	writeTool,
+	bashTool,
 	READ_TOOL,
 	WRITE_TOOL,
+	BASH_TOOL,
 	READ_FILE_PATH_SCHEMA,
 	TOOLS,
 	implementations,

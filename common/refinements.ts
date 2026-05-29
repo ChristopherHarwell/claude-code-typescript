@@ -3,6 +3,7 @@ import type {
 	FilePath,
 	NonEmptyString,
 	PromptFlag,
+	ShellCommand,
 	URLString,
 } from "./types";
 import {
@@ -48,4 +49,9 @@ export function asPromptFlag(value: string): PromptFlag {
 export function asFilePath(value: string, field: string): FilePath {
 	asNonEmptyString(value, field);
 	return value as FilePath;
+}
+
+export function asShellCommand(value: string, field: string): ShellCommand {
+	asNonEmptyString(value, field);
+	return value as ShellCommand;
 }
