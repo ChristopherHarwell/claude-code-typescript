@@ -23,11 +23,9 @@ import {
 } from "./tools";
 import { deepFreeze } from "./deepFreeze";
 import { EmptyChoicesError, MaxIterationsExceededError } from "./Error";
+import { MAX_ITERATIONS, MODEL_ID } from "./constants";
 
 // ── Agent loop ────────────────────────────────────────────────────
-
-const MODEL_ID: NonEmptyString = "anthropic/claude-haiku-4.5" as NonEmptyString;
-const MAX_ITERATIONS: number = 50;
 
 // One iteration: send the transcript, append the assistant reply, dispatch any
 // tool calls, append their results, and recurse with a fresh frozen transcript.
@@ -123,4 +121,4 @@ async function runAgentLoop(
 	await step(client, initial, 0);
 }
 
-export { runAgentLoop, MODEL_ID, MAX_ITERATIONS };
+export { runAgentLoop };

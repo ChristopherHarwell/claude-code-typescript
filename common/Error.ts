@@ -1,32 +1,13 @@
 import type { ErrorCode, ErrorKind } from "./types";
+import { ERROR_CODES } from "./constants";
 
 // ── Error taxonomy ─────────────────────────────────────────────────
 //
 // Every thrown error in this project should extend AppError so a caller can
 // dispatch on `kind` (string literal) or `code` (stable numeric id) without
 // regex-matching messages. ErrorCode and ErrorKind are declared in types.ts;
-// the `satisfies` below keeps the runtime map in lockstep with them.
-//
-// Code ranges:
-//   1xxx — configuration / startup
-//   2xxx — input validation / refinement
-//   3xxx — protocol / API response
-//   4xxx — tool execution
-//   5xxx — agent loop control
-
-const ERROR_CODES = {
-	MissingEnvVar:           1001,
-	InvalidCliArguments:     1002,
-	EmptyString:             2001,
-	InvalidUrl:              2002,
-	UnexpectedFlag:          2003,
-	InvalidPath:             2004,
-	EmptyChoices:            3001,
-	UnsupportedToolCallType: 3002,
-	UnknownToolName:         3003,
-	ToolNotImplemented:      4001,
-	MaxIterationsExceeded:   5001,
-} as const satisfies { readonly [K in ErrorKind]: ErrorCode };
+// the ERROR_CODES table lives in constants.ts and is kept in lockstep via a
+// `satisfies` clause at its declaration.
 
 abstract class AppError extends Error {
 	public abstract readonly kind: ErrorKind;
@@ -169,10 +150,7 @@ class MaxIterationsExceededError extends AppError {
 	}
 }
 
-Object.freeze(ERROR_CODES);
-
 export {
-	ERROR_CODES,
 	AppError,
 	MissingEnvVarError,
 	InvalidCliArgumentsError,

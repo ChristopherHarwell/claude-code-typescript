@@ -20,6 +20,7 @@ import {
   MissingEnvVarError,
 } from "../common/Error";
 import { runAgentLoop } from "../common/loop";
+import { DEFAULT_BASE_URL } from "../common/constants";
 
 // ── Entrypoint ────────────────────────────────────────────────────
 
@@ -32,8 +33,7 @@ async function main(): Promise<void> {
   const rawFlag: string | undefined = argv[2];
   const rawPrompt: string | undefined = argv[3];
   const rawApiKey: string | undefined = process.env.OPENROUTER_API_KEY;
-  const rawBaseURL: string =
-    process.env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api/v1";
+  const rawBaseURL: string = process.env.OPENROUTER_BASE_URL ?? DEFAULT_BASE_URL;
 
   if (rawApiKey === undefined) {
     throw new MissingEnvVarError("OPENROUTER_API_KEY");

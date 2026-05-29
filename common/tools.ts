@@ -32,6 +32,7 @@ import {
 	UnknownToolNameError,
 	UnsupportedToolCallTypeError,
 } from "./Error";
+import { TOOL_NAMES } from "./constants";
 
 // ── Tool definitions ──────────────────────────────────────────────
 
@@ -233,10 +234,6 @@ const implementations: DeepReadonly<Owned<ToolImplementations>> = deepFreeze<
 // may include non-function variants. Narrow at the boundary; fail loud on
 // anything unexpected instead of asserting blindly downstream.
 
-const TOOL_NAMES: DeepReadonly<Owned<ReadonlySet<ToolName>>> = deepFreeze(
-	new Set<ToolName>(["Read", "Write", "Edit", "Bash"]),
-);
-
 function isToolName(name: string): name is ToolName {
 	return TOOL_NAMES.has(name as ToolName);
 }
@@ -341,7 +338,6 @@ export {
 	READ_FILE_PATH_SCHEMA,
 	TOOLS,
 	implementations,
-	TOOL_NAMES,
 	isToolName,
 	narrowToolCall,
 	executeToolCall,
