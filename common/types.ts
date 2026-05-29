@@ -56,6 +56,7 @@ type Tool = ToolDefinition<ToolName>;
 
 
 type ReadTool = ToolDefinition<"Read">;
+type WriteTool = ToolDefinition<"Write">;
 
 // ---------------------------------------------------------------------------
 // Tool call responses (subset of ToolDefinition: keeps `name`, drops
@@ -170,6 +171,7 @@ export type {
 	Tool,
 	ToolName,
 	ReadTool,
+	WriteTool,
 	ToolCallResponse,
 	ToolArgs,
 	ParsedToolCall,

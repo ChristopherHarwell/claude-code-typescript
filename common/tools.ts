@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import type {
 	ChatCompletionResponse,
 	DeepReadonly,
@@ -14,6 +14,7 @@ import type {
 	ToolImplementations,
 	ToolName,
 	ToolResultMessage,
+	WriteTool,
 } from "./types";
 import { deepFreeze } from "./deepFreeze";
 import { asFilePath } from "./refinements";
@@ -43,6 +44,28 @@ const readTool: ReadTool = deepFreeze<ReadTool>({
 	},
 });
 
+const writeTool: WriteTool = deepFreeze<WriteTool>({
+	type: "function",
+	function: {
+		name: "Write",
+		description: "Write content to a file",
+		parameters: {
+			type: "object",
+			properties: {
+				file_path: {
+					type: "string",
+					description: "The path of the file to write to",
+				},
+				content: {
+					type: "string",
+					description: "The content to write to the file",
+				},
+			},
+			required: ["file_path", "content"],
+		},
+	},
+});
+
 // ── Tool registry ─────────────────────────────────────────────────
 // Identity helper that re-binds a ToolDefinition with a tighter generic so
 // every registered tool carries its name in its type. Frozen at module load.
@@ -54,12 +77,14 @@ function asToolDef<TName extends ToolName>(
 }
 
 const READ_TOOL: ReadTool = asToolDef<"Read">(readTool);
+const WRITE_TOOL: WriteTool = asToolDef<"Write">(writeTool);
 
 const READ_FILE_PATH_SCHEMA: JSONSchemaProperty =
 	READ_TOOL.function.parameters.properties.file_path;
 
 const TOOLS: DeepReadonly<Owned<ReadonlyArray<Tool>>> = deepFreeze<Tool[]>([
 	READ_TOOL,
+	WRITE_TOOL,
 ]);
 
 // ── Tool implementations ──────────────────────────────────────────
@@ -71,8 +96,10 @@ const implementations: DeepReadonly<Owned<ToolImplementations>> =
 			const path: FilePath = asFilePath(args.file_path, "Read.file_path");
 			return readFile(path, "utf8");
 		},
-		Write: async (_args: Readonly<ToolArgs["Write"]>): Promise<string> => {
-			throw new ToolNotImplementedError("Write");
+		Write: async (args: Readonly<ToolArgs["Write"]>): Promise<string> => {
+			const path: FilePath = asFilePath(args.file_path, "Write.file_path");
+			await writeFile(path, args.content, "utf8");
+			return `File written successfully: ${path}`;
 		},
 		Edit: async (_args: Readonly<ToolArgs["Edit"]>): Promise<string> => {
 			throw new ToolNotImplementedError("Edit");
@@ -188,7 +215,9 @@ async function handleResponse(
 
 export {
 	readTool,
+	writeTool,
 	READ_TOOL,
+	WRITE_TOOL,
 	READ_FILE_PATH_SCHEMA,
 	TOOLS,
 	implementations,
